@@ -11,13 +11,11 @@ st.title("📋 Tạo File Hạch Toán - Chỉ KCB (KB NGOẠI TRÚ)")
 uploaded_file = st.file_uploader("📂 Chọn file Excel (.xlsx)", type=["xlsx"])
 chu_hau_to = st.text_input("✍️ Hậu tố chứng từ (VD: A, B1, NV123)").strip().upper()
 
-# 🧠 Chỉ giữ lại dòng KCB nếu "KHOA/BỘ PHẬN" là "KB NGOẠI TRÚ"
 def classify_department(value):
     if isinstance(value, str) and value.strip().upper() == "KB NGOẠI TRÚ":
         return "KCB"
     return None
 
-# ⚙️ Chỉ duy nhất 1 loại category
 category_info = {
     "KCB": {"ma": "KHACHLE01", "ten": "Khách hàng lẻ - Khám chữa bệnh"}
 }
@@ -29,7 +27,7 @@ if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
 
         data_by_category = {"KCB": {}}
         logs = []
-        prefix = "T00_0000"  # sẽ cập nhật sau khi tìm được ngày
+        prefix = "T00_0000"  # placeholder
 
         for sheet_name in xls.sheet_names:
             if not sheet_name.replace(".", "", 1).isdigit() and not sheet_name.replace(",", "", 1).isdigit():
@@ -65,7 +63,6 @@ if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
                 ngay_quy = pd.to_datetime(df_mode["NGÀY QUỸ"], errors="coerce")
                 ngay_kham = pd.to_datetime(df_mode["NGÀY KHÁM"], errors="coerce")
 
-                # ✅ Lấy tháng/năm từ ngày quỹ đầu tiên hợp lệ
                 for date_series in [ngay_quy, ngay_kham]:
                     sample_date = date_series.dropna()
                     if not sample_date.empty:
@@ -99,6 +96,9 @@ if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
                 out_df["Mã đối tượng (hạch toán)"] = ""
                 out_df["Số TK ngân hàng"] = ""
                 out_df["Tên ngân hàng"] = ""
+
+                # ✅ Thêm KHOA/BỘ PHẬN vào output
+                out_df["KHOA/BỘ PHẬN"] = df_mode["KHOA/BỘ PHẬN"]
 
                 data_by_category[category].setdefault(sheet_name, {})[mode] = out_df
                 logs.append(f"✅ {sheet_name} ({category}) [{mode}]: {len(out_df)} dòng")
