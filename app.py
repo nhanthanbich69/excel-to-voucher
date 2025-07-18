@@ -97,9 +97,6 @@ if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
                 out_df["Số TK ngân hàng"] = ""
                 out_df["Tên ngân hàng"] = ""
 
-                # ✅ Thêm KHOA/BỘ PHẬN vào output
-                out_df["KHOA/BỘ PHẬN"] = df_mode["KHOA/BỘ PHẬN"]
-
                 data_by_category[category].setdefault(sheet_name, {})[mode] = out_df
                 logs.append(f"✅ {sheet_name} ({category}) [{mode}]: {len(out_df)} dòng")
 
