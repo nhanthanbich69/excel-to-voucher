@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import zipfile
@@ -35,10 +34,12 @@ category_info = {
     "VACCINE": {"ma": "KHACHLE03", "ten": "Khách hàng lẻ - Vacxin"}
 }
 
-if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
+tab1, tab2 = st.tabs(["🧾 Tất cả dữ liệu", "🏥 Chỉ KCB - KB NGOẠI TRÚ"])
+
+def handle_processing(file, filter_kcb_only=False):
     try:
-        xls = pd.ExcelFile(uploaded_file)
-        st.success(f"📥 Đọc thành công file `{uploaded_file.name}` với {len(xls.sheet_names)} sheet.")
+        xls = pd.ExcelFile(file)
+        st.success(f"📥 Đọc thành công file `{file.name}` với {len(xls.sheet_names)} sheet.")
 
         data_by_category = {k: {} for k in category_info}
         logs = []
@@ -57,6 +58,10 @@ if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
 
             df["TIỀN MẶT"] = pd.to_numeric(df["TIỀN MẶT"], errors="coerce")
             df = df[df["TIỀN MẶT"].notna() & (df["TIỀN MẶT"] != 0)]
+
+            if filter_kcb_only:
+                df = df[df["KHOA/BỘ PHẬN"].str.upper() == "KB NGOẠI TRÚ"]
+
             df["CATEGORY"] = df["KHOA/BỘ PHẬN"].apply(classify_department)
 
             for category in data_by_category:
@@ -131,3 +136,11 @@ if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
     except Exception as e:
         st.error("❌ Đã xảy ra lỗi:")
         st.code(traceback.format_exc(), language="python")
+
+with tab1:
+    if st.button("🚀 Tạo từ tất cả dữ liệu") and uploaded_file and chu_hau_to:
+        handle_processing(uploaded_file, filter_kcb_only=False)
+
+with tab2:
+    if st.button("🏥 Tạo riêng cho KCB - KB NGOẠI TRÚ") and uploaded_file and chu_hau_to:
+        handle_processing(uploaded_file, filter_kcb_only=True)
