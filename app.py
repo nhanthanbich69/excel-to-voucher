@@ -78,7 +78,7 @@ if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
                 def gen_so_chung_tu(date_str):
                     try:
                         d, m, y = date_str.split("/")
-                        return f"{mode}{y}{m.zfill(2)}{d.zfill(2)}_{chu_hau_to}"
+                        return f"{mode}{d.zfill(2)}{m.zfill(2)}{y}_{chu_hau_to}"
                     except:
                         return f"{mode}_INVALID_{chu_hau_to}"
 
