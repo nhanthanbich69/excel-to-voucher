@@ -3,21 +3,13 @@ import pandas as pd
 import zipfile
 from io import BytesIO
 import traceback
+from datetime import datetime
 
 st.set_page_config(page_title="Tạo File Hạch Toán", layout="wide")
-st.title("📋 Tạo File Hạch Toán Chuẩn từ Excel (Chỉ KCB - KB NGOẠI TRÚ)")
+st.title("📋 Tạo File Hạch Toán - Chỉ KCB (KB NGOẠI TRÚ)")
 
 uploaded_file = st.file_uploader("📂 Chọn file Excel (.xlsx)", type=["xlsx"])
-
-col1, col2, col3 = st.columns(3)
-with col1:
-    thang = st.selectbox("🗓️ Chọn tháng", [str(i).zfill(2) for i in range(1, 13)])
-with col2:
-    nam = st.selectbox("📆 Chọn năm", [str(y) for y in range(2020, 2031)])
-with col3:
-    chu_hau_to = st.text_input("✍️ Hậu tố chứng từ (VD: A, B1, NV123)").strip().upper()
-
-prefix = f"T{thang}_{nam}"
+chu_hau_to = st.text_input("✍️ Hậu tố chứng từ (VD: A, B1, NV123)").strip().upper()
 
 # 🧠 Chỉ giữ lại dòng KCB nếu "KHOA/BỘ PHẬN" là "KB NGOẠI TRÚ"
 def classify_department(value):
@@ -37,6 +29,7 @@ if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
 
         data_by_category = {"KCB": {}}
         logs = []
+        prefix = "T00_0000"  # sẽ cập nhật sau khi tìm được ngày
 
         for sheet_name in xls.sheet_names:
             if not sheet_name.replace(".", "", 1).isdigit() and not sheet_name.replace(",", "", 1).isdigit():
@@ -61,6 +54,7 @@ if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
                 continue
 
             category = "KCB"
+
             for mode in ["PT", "PC"]:
                 is_pt = mode == "PT"
                 df_mode = df[df["TIỀN MẶT"] > 0] if is_pt else df[df["TIỀN MẶT"] < 0]
@@ -68,8 +62,18 @@ if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
                     continue
 
                 out_df = pd.DataFrame()
-                out_df["Ngày hạch toán (*)"] = pd.to_datetime(df_mode["NGÀY QUỸ"], errors="coerce").dt.strftime("%d/%m/%Y")
-                out_df["Ngày chứng từ (*)"] = pd.to_datetime(df_mode["NGÀY KHÁM"], errors="coerce").dt.strftime("%d/%m/%Y")
+                ngay_quy = pd.to_datetime(df_mode["NGÀY QUỸ"], errors="coerce")
+                ngay_kham = pd.to_datetime(df_mode["NGÀY KHÁM"], errors="coerce")
+
+                # ✅ Lấy tháng/năm từ ngày quỹ đầu tiên hợp lệ
+                for date_series in [ngay_quy, ngay_kham]:
+                    sample_date = date_series.dropna()
+                    if not sample_date.empty:
+                        prefix = f"T{sample_date.iloc[0].month:02}_{sample_date.iloc[0].year}"
+                        break
+
+                out_df["Ngày hạch toán (*)"] = ngay_quy.dt.strftime("%d/%m/%Y")
+                out_df["Ngày chứng từ (*)"] = ngay_kham.dt.strftime("%d/%m/%Y")
 
                 def gen_so_chung_tu(date_str):
                     try:
