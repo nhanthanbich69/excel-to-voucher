@@ -146,58 +146,60 @@ with tab1:
 with tab2:
     st.markdown("### 🧮 So sánh khách giữa file gốc và các file đầu ra")
 
-    original_file = st.file_uploader("📂 Chọn file Excel GỐC", type=["xlsx"], key="goc")
-    output_files = st.file_uploader("📂 Chọn các file Excel đầu ra để so sánh", type=["xlsx"], accept_multiple_files=True, key="daura")
+    # Tải file gốc và các file đầu ra
+    original_file = st.file_uploader("📂 Chọn file Excel GỐC", type=["xlsx"], key="origin_file_compare")
+    uploaded_files = st.file_uploader("📂 Chọn các file Excel đầu ra để so sánh", type=["xlsx"], accept_multiple_files=True, key="output_files_compare")
 
-    if original_file and output_files:
+    if original_file and uploaded_files:
         try:
-            # Đọc file gốc
-            df_orig = pd.read_excel(original_file)
-            df_orig.columns = [c.strip().upper() for c in df_orig.columns]
-            df_orig = df_orig[df_orig["HỌ VÀ TÊN"].notna()]
-            df_orig["NGÀY KHÁM"] = pd.to_datetime(df_orig["NGÀY KHÁM"], errors="coerce")
+            # ========== Đọc file gốc ==========
+            df_goc = pd.read_excel(original_file, sheet_name=None)
+            df_goc_all = pd.concat(df_goc.values(), ignore_index=True)
+            df_goc_all.columns = df_goc_all.columns.str.upper()
 
-            if "KHOA/BỘ PHẬN" not in df_orig.columns:
-                df_orig["KHOA/BỘ PHẬN"] = "Không rõ"
+            # Giữ lại cột cần thiết & xử lý ngày
+            df_goc_all = df_goc_all[["HỌ VÀ TÊN", "KHOA/BỘ PHẬN", "NGÀY KHÁM"]].dropna()
+            df_goc_all["HỌ VÀ TÊN"] = df_goc_all["HỌ VÀ TÊN"].str.strip()
+            df_goc_all["NGÀY KHÁM"] = pd.to_datetime(df_goc_all["NGÀY KHÁM"], errors="coerce")
 
-            original_guests = df_orig[["HỌ VÀ TÊN", "KHOA/BỘ PHẬN", "NGÀY KHÁM"]].drop_duplicates()
-
-            # Đọc toàn bộ file đầu ra
-            out_all = pd.DataFrame()
-            for f in output_files:
-                xls = pd.ExcelFile(f)
+            # ========== Đọc tên từ các file output ==========
+            all_output_names = set()
+            for file in uploaded_files:
+                xls = pd.ExcelFile(file)
                 for sheet in xls.sheet_names:
-                    df_tmp = xls.parse(sheet)
-                    df_tmp.columns = [c.strip().upper() for c in df_tmp.columns]
-                    if "DIỄN GIẢI (HẠCH TOÁN)" in df_tmp.columns:
-                        out_all = pd.concat([out_all, df_tmp], ignore_index=True)
+                    df = xls.parse(sheet)
+                    if "Diễn giải (hạch toán)" in df.columns:
+                        # Trích xuất tên khách từ phần "Diễn giải"
+                        ho_ten = df["Diễn giải (hạch toán)"].str.extract(r"-\s*(.*)")
+                        names = ho_ten[0].dropna().str.strip()
+                        all_output_names.update(names)
 
-            # Trích tên khách từ diễn giải
-            out_all["HỌ VÀ TÊN"] = out_all["DIỄN GIẢI (HẠCH TOÁN)"].str.extract(r"- (.*)")
-            output_guests = out_all["HỌ VÀ TÊN"].dropna().unique()
+            # ========== So sánh theo từng ngày ==========
+            guest_by_day = df_goc_all.groupby(df_goc_all["NGÀY KHÁM"].dt.strftime("%d/%m/%Y"))
+            missing_by_day = {}
 
-            original_names = set(original_guests["HỌ VÀ TÊN"])
-            output_names = set(output_guests)
+            for date_str, group in guest_by_day:
+                guests_in_day = set(group["HỌ VÀ TÊN"])
+                guests_found = set(g for g in all_output_names if g in guests_in_day)
+                guests_missing = guests_in_day - guests_found
 
-            missing_names = original_names - output_names
-            extra_names = output_names - original_names
+                if guests_missing:
+                    group_missing = group[group["HỌ VÀ TÊN"].isin(guests_missing)]
+                    missing_by_day[date_str] = group_missing
 
-            def display_guest_list(title, name_list, color, full_df):
-                if name_list:
-                    st.markdown(f"### {title} ({len(name_list)} khách)")
-                    df_display = full_df[full_df["HỌ VÀ TÊN"].isin(name_list)].copy()
-                    df_display.sort_values("NGÀY KHÁM", inplace=True)
-                    for date, group in df_display.groupby(df_display["NGÀY KHÁM"].dt.strftime("%d/%m/%Y")):
-                        st.markdown(f"#### 📅 Ngày khám: `{date}`")
-                        st.dataframe(group[["HỌ VÀ TÊN", "KHOA/BỘ PHẬN", "NGÀY KHÁM"]], use_container_width=True)
-                else:
-                    st.success(f"✅ Không có khách nào thuộc nhóm {title.lower()}.")
-
-            display_guest_list("❌ Thiếu khách (có trong file gốc nhưng không có trong đầu ra)", missing_names, "red", original_guests)
-            display_guest_list("⚠️ Dư khách (có trong đầu ra nhưng không có trong file gốc)", extra_names, "orange", pd.DataFrame({"HỌ VÀ TÊN": list(extra_names)}))
+            # ========== Hiển thị ==========
+            if missing_by_day:
+                total_missing = sum(len(v) for v in missing_by_day.values())
+                st.markdown(f"### ❌ Thiếu khách (có trong file gốc nhưng không có trong đầu ra) ({total_missing} khách)")
+                for date, df in sorted(missing_by_day.items()):
+                    st.markdown(f"#### 📅 Ngày khám: `{date}`")
+                    st.dataframe(df[["HỌ VÀ TÊN", "KHOA/BỘ PHẬN", "NGÀY KHÁM"]], use_container_width=True)
+            else:
+                st.success("✅ Không thiếu khách nào theo từng ngày.")
 
         except Exception as e:
-            st.error("❌ Đã xảy ra lỗi:")
-            st.code(traceback.format_exc(), language="python")
+            st.error("❌ Đã xảy ra lỗi khi so sánh:")
+            st.code(traceback.format_exc())
+
     else:
-        st.info("⬆️ Vui lòng chọn đầy đủ file GỐC và file đầu ra để tiến hành so sánh.")
+        st.info("📥 Vui lòng chọn đầy đủ file gốc và các file đầu ra để tiến hành so sánh.")
