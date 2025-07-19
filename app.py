@@ -144,82 +144,65 @@ with tab1:
 
 with tab2:
     st.markdown("### 🧮 So sánh khách giữa file gốc và các file đầu ra")
+
     original_file = st.file_uploader("📂 Chọn file Excel GỐC", type=["xlsx"], key="origin_file_compare")
     uploaded_files = st.file_uploader("📂 Chọn các file Excel đầu ra để so sánh", type=["xlsx"], accept_multiple_files=True, key="output_files_compare")
 
     if original_file and uploaded_files:
         try:
-            # Đọc toàn bộ file gốc
+            # Đọc file gốc
             df_goc = pd.read_excel(original_file, sheet_name=None)
-            df_all = pd.concat(df_goc.values(), ignore_index=True)
-            df_all.columns = df_all.columns.str.upper()
-            df_all = df_all[["HỌ VÀ TÊN", "KHOA/BỘ PHẬN", "NGÀY KHÁM", "DIỄN GIẢI"]].dropna(subset=["NGÀY KHÁM"])
-            df_all["HỌ VÀ TÊN"] = df_all["HỌ VÀ TÊN"].astype(str).str.strip()
-            df_all["NGÀY KHÁM"] = pd.to_datetime(df_all["NGÀY KHÁM"], errors="coerce")
+            df_goc_all = pd.concat(df_goc.values(), ignore_index=True)
+            df_goc_all.columns = df_goc_all.columns.str.upper().str.strip()
 
-            # Gắn loại dịch vụ
-            def get_dich_vu(row):
-                dien_giai = str(row.get("DIỄN GIẢI", "")).upper()
-                if "VẮC XIN" in dien_giai:
-                    return "VACCINE"
-                elif "THUỐC" in dien_giai:
-                    return "THUOC"
-                else:
-                    return "KCB"
+            # Kiểm tra cột bắt buộc
+            required_cols = {"HỌ VÀ TÊN", "KHOA/BỘ PHẬN", "NGÀY KHÁM"}
+            if not required_cols.issubset(df_goc_all.columns):
+                st.error("❌ File gốc thiếu một trong các cột: HỌ VÀ TÊN, KHOA/BỘ PHẬN, NGÀY KHÁM.")
+                st.stop()
 
-            df_all["DỊCH VỤ"] = df_all.apply(get_dich_vu, axis=1)
+            # Tiền xử lý file gốc
+            df_goc_all = df_goc_all[list(required_cols)].dropna(subset=["NGÀY KHÁM"])
+            df_goc_all["HỌ VÀ TÊN"] = df_goc_all["HỌ VÀ TÊN"].str.strip()
+            df_goc_all["NGÀY KHÁM"] = pd.to_datetime(df_goc_all["NGÀY KHÁM"], errors="coerce")
 
-            # Đọc các file đầu ra
-            all_missing = []
-
+            # Đọc danh sách tên khách từ các file đầu ra
+            all_output_names = set()
             for file in uploaded_files:
-                # Nhận diện loại dịch vụ từ tên file
-                filename = file.name.upper()
-                if "KCB" in filename:
-                    dv = "KCB"
-                elif "THUOC" in filename:
-                    dv = "THUOC"
-                elif "VACCINE" in filename:
-                    dv = "VACCINE"
-                else:
-                    st.warning(f"⚠️ Không xác định được loại dịch vụ từ file: {file.name}")
-                    continue
+                xls = pd.ExcelFile(file)
+                for sheet in xls.sheet_names:
+                    df = xls.parse(sheet)
+                    cols = df.columns.str.upper().str.strip()
+                    df.columns = cols
 
-                df_out = pd.read_excel(file)
-                if "Diễn giải (hạch toán)" not in df_out.columns:
-                    st.warning(f"⚠️ Thiếu cột 'Diễn giải (hạch toán)' trong file: {file.name}")
-                    continue
+                    if "DIỄN GIẢI (HẠCH TOÁN)" in cols:
+                        ho_ten = df["DIỄN GIẢI (HẠCH TOÁN)"].astype(str).str.extract(r"- (.*)")
+                        names = ho_ten[0].dropna().str.strip()
+                        all_output_names.update(names)
 
-                df_out["HỌ VÀ TÊN"] = df_out["Diễn giải (hạch toán)"].str.extract(r"- (.*)")[0].str.strip()
-                df_out = df_out[df_out["HỌ VÀ TÊN"].notna()]
-                output_names = set(df_out["HỌ VÀ TÊN"])
+            # So sánh theo từng ngày
+            guest_by_day = df_goc_all.groupby(df_goc_all["NGÀY KHÁM"].dt.strftime("%d/%m/%Y"))
+            missing_by_day = {}
 
-                df_goc_dv = df_all[df_all["DỊCH VỤ"] == dv]
-                grouped = df_goc_dv.groupby(df_goc_dv["NGÀY KHÁM"].dt.strftime("%d/%m/%Y"))
-
-                for date_str, group in grouped:
-                    names_in_goc = set(group["HỌ VÀ TÊN"])
-                    missing_names = names_in_goc - output_names
-                    if missing_names:
-                        df_missing = group[group["HỌ VÀ TÊN"].isin(missing_names)].copy()
-                        df_missing["NGÀY"] = date_str
-                        df_missing["DỊCH VỤ"] = dv
-                        all_missing.append(df_missing)
+            for date_str, group in guest_by_day:
+                guests_in_day = set(group["HỌ VÀ TÊN"])
+                guests_found = set(g for g in all_output_names if g in guests_in_day)
+                guests_missing = guests_in_day - guests_found
+                if guests_missing:
+                    missing_by_day[date_str] = group[group["HỌ VÀ TÊN"].isin(guests_missing)]
 
             # Hiển thị kết quả
-            if all_missing:
-                df_all_missing = pd.concat(all_missing, ignore_index=True)
-                total_missing = len(df_all_missing)
+            if missing_by_day:
+                total_missing = sum(len(v) for v in missing_by_day.values())
                 st.markdown(f"### ❌ Thiếu khách (có trong file gốc nhưng không có trong đầu ra) ({total_missing} khách)")
-
-                for (dv, date_str), group in df_all_missing.groupby(["DỊCH VỤ", "NGÀY"]):
-                    st.markdown(f"#### 📅 Ngày khám: `{date_str}` - 🧾 Dịch vụ: `{dv}`")
-                    st.dataframe(group[["HỌ VÀ TÊN", "KHOA/BỘ PHẬN", "NGÀY KHÁM"]], use_container_width=True)
+                for date, df in missing_by_day.items():
+                    st.markdown(f"#### 📅 Ngày khám: `{date}`")
+                    st.dataframe(df[["HỌ VÀ TÊN", "KHOA/BỘ PHẬN", "NGÀY KHÁM"]], use_container_width=True)
             else:
-                st.success("✅ Không thiếu khách nào theo từng dịch vụ và ngày khám.")
+                st.success("✅ Không thiếu khách nào theo từng ngày.")
 
         except Exception as e:
-            st.error("❌ Lỗi khi xử lý so sánh:")
+            st.error("❌ Đã xảy ra lỗi khi so sánh:")
             st.code(traceback.format_exc())
     else:
         st.info("📥 Vui lòng chọn đầy đủ file gốc và các file đầu ra để tiến hành so sánh.")
