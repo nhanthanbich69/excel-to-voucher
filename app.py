@@ -27,7 +27,9 @@ if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
 
         data_by_category = {"KCB": {}}
         logs = []
-        prefix = "T00_0000"  # placeholder
+        all_original_names = set()
+        all_final_names = set()
+        prefix = "T00_0000"
 
         for sheet_name in xls.sheet_names:
             if not sheet_name.replace(".", "", 1).isdigit() and not sheet_name.replace(",", "", 1).isdigit():
@@ -46,6 +48,8 @@ if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
 
             df["CATEGORY"] = df["KHOA/BỘ PHẬN"].apply(classify_department)
             df = df[df["CATEGORY"] == "KCB"]
+
+            all_original_names.update(df["HỌ VÀ TÊN"].dropna().unique())
 
             if df.empty:
                 logs.append(f"⏩ Sheet `{sheet_name}` không có dữ liệu KCB từ 'KB NGOẠI TRÚ'.")
@@ -75,7 +79,7 @@ if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
                 def gen_so_chung_tu(date_str):
                     try:
                         d, m, y = date_str.split("/")
-                        return f"{mode}{d.zfill(2)}{m.zfill(2)}{y}_{chu_hau_to}"
+                        return f"{mode}_THUOC_{d}{m}{y}_{chu_hau_to}"
                     except:
                         return f"{mode}_INVALID_{chu_hau_to}"
 
@@ -97,8 +101,13 @@ if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
                 out_df["Số TK ngân hàng"] = ""
                 out_df["Tên ngân hàng"] = ""
 
+                all_final_names.update(df_mode["HỌ VÀ TÊN"].dropna().unique())
+
                 data_by_category[category].setdefault(sheet_name, {})[mode] = out_df
                 logs.append(f"✅ {sheet_name} ({category}) [{mode}]: {len(out_df)} dòng")
+
+        missing_names = sorted(all_original_names - all_final_names)
+        extra_names = sorted(all_final_names - all_original_names)
 
         if all(not sheets for sheets in data_by_category.values()):
             st.warning("⚠️ Không có dữ liệu hợp lệ sau khi lọc.")
@@ -116,6 +125,14 @@ if st.button("🚀 Tạo File Zip") and uploaded_file and chu_hau_to:
                                     for idx, chunk in enumerate(chunks):
                                         sheet_tab = mode if idx == 0 else f"{mode} {idx + 1}"
                                         chunk.to_excel(writer, sheet_name=sheet_tab, index=False)
+                            
+                            # ➕ Thêm tab thống kê khách bị thiếu/thừa
+                            summary_df = pd.DataFrame({
+                                "Khách bị lọc mất (gốc có - kết quả không)": pd.Series(missing_names),
+                                "Khách xuất hiện thêm (kết quả có - gốc không)": pd.Series(extra_names)
+                            })
+                            summary_df.to_excel(writer, sheet_name="🔍 So sánh KH", index=False)
+
                         output.seek(0)
                         zip_path = f"{prefix}_{category}/{day.replace(',', '.').strip()}.xlsx"
                         zip_file.writestr(zip_path, output.read())
