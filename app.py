@@ -146,9 +146,9 @@ with tab1:
 with tab2:
     st.markdown("### 🧮 So sánh khách giữa file gốc và các file đầu ra")
     original_file = st.file_uploader("📂 Chọn file Excel GỐC", type=["xlsx"], key="origin_file_compare")
-    uploaded_files = st.file_uploader("📂 Chọn các file Excel đầu ra để so sánh", type=["xlsx"], accept_multiple_files=True, key="output_files_compare")
+    zip_file = st.file_uploader("📂 Upload file ZIP chứa các file đầu ra (KCB, THUOC, VACCINE)", type=["zip"], key="zip_output_compare")
 
-    if original_file and uploaded_files:
+    if original_file and zip_file:
         try:
             # Đọc file gốc
             df_goc = pd.read_excel(original_file, sheet_name=None)
@@ -158,49 +158,53 @@ with tab2:
             df_goc_all["NGÀY KHÁM"] = pd.to_datetime(df_goc_all["NGÀY KHÁM"], errors="coerce")
             df_goc_all = df_goc_all.dropna(subset=["NGÀY KHÁM"])
 
-            # Tách nhóm file đầu ra theo ngày
-            all_missing = {}
+            # Giải nén file zip
+            with tempfile.TemporaryDirectory() as tmpdir:
+                with zipfile.ZipFile(zip_file, "r") as zip_ref:
+                    zip_ref.extractall(tmpdir)
 
-            for file in uploaded_files:
-                file_name = file.name
-                match = re.search(r'(\d{2}-\d{2}-\d{4})', file_name)
-                if not match:
-                    continue
+                all_missing = {}
 
-                date_str = match.group(1)
-                date_obj = pd.to_datetime(date_str, dayfirst=True, errors="coerce")
-                if pd.isna(date_obj):
-                    continue
+                for filename in os.listdir(tmpdir):
+                    if not filename.lower().endswith(".xlsx"):
+                        continue
+                    file_path = os.path.join(tmpdir, filename)
+                    match = re.search(r'(\d{2}-\d{2}-\d{4})', filename)
+                    if not match:
+                        continue
+                    date_str = match.group(1)
+                    date_obj = pd.to_datetime(date_str, dayfirst=True, errors="coerce")
+                    if pd.isna(date_obj):
+                        continue
 
-                df_out = pd.read_excel(file, sheet_name=None)
-                all_names = set()
+                    df_out = pd.read_excel(file_path, sheet_name=None)
+                    all_names = set()
 
-                for sheet in df_out:
-                    df = df_out[sheet]
-                    if "Diễn giải (hạch toán)" in df.columns:
-                        extracted = df["Diễn giải (hạch toán)"].astype(str).str.extract(r"-\s*(.*)")
-                        names = extracted[0].dropna().str.strip().str.upper()
-                        all_names.update(names)
+                    for sheet in df_out:
+                        df = df_out[sheet]
+                        if "Diễn giải (hạch toán)" in df.columns:
+                            extracted = df["Diễn giải (hạch toán)"].astype(str).str.extract(r"-\s*(.*)")
+                            names = extracted[0].dropna().str.strip().str.upper()
+                            all_names.update(names)
 
-                # Lọc dữ liệu gốc chỉ trong ngày và chỉ những người thuộc bộ phận đúng với file này
-                df_day = df_goc_all[df_goc_all["NGÀY KHÁM"] == date_obj]
-                khoa = None
-                if "_KCB_" in file_name.upper():
-                    khoa = "KCB"
-                elif "_THUOC_" in file_name.upper():
-                    khoa = "THUỐC"
-                elif "_VACCINE_" in file_name.upper():
-                    khoa = "VACCINE"
+                    # Lọc dữ liệu gốc chỉ trong ngày và bộ phận tương ứng
+                    df_day = df_goc_all[df_goc_all["NGÀY KHÁM"] == date_obj]
+                    khoa = None
+                    if "_KCB_" in filename.upper():
+                        khoa = "KCB"
+                    elif "_THUOC_" in filename.upper():
+                        khoa = "THUỐC"
+                    elif "_VACCINE_" in filename.upper():
+                        khoa = "VACCINE"
+                    if khoa:
+                        df_day = df_day[df_day["KHOA/BỘ PHẬN"].str.upper().str.contains(khoa)]
 
-                if khoa:
-                    df_day = df_day[df_day["KHOA/BỘ PHẬN"].str.upper().str.contains(khoa)]
-                
-                guest_set = set(df_day["HỌ VÀ TÊN"])
-                missing_guests = guest_set - all_names
+                    guest_set = set(df_day["HỌ VÀ TÊN"])
+                    missing_guests = guest_set - all_names
 
-                if missing_guests:
-                    df_missing = df_day[df_day["HỌ VÀ TÊN"].isin(missing_guests)]
-                    all_missing[date_str + f" ({khoa})"] = df_missing
+                    if missing_guests:
+                        df_missing = df_day[df_day["HỌ VÀ TÊN"].isin(missing_guests)]
+                        all_missing[date_str + f" ({khoa})"] = df_missing
 
             if all_missing:
                 st.markdown(f"### ❌ Thiếu khách ({sum(len(df) for df in all_missing.values())} khách)")
@@ -214,5 +218,4 @@ with tab2:
             st.error("❌ Lỗi khi so sánh:")
             st.code(traceback.format_exc())
     else:
-        st.info("📥 Vui lòng chọn đầy đủ file gốc và file đầu ra.")
-
+        st.info("📥 Vui lòng chọn file gốc và file zip đầu ra để so sánh.")
