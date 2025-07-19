@@ -144,24 +144,60 @@ with tab1:
 
 
 with tab2:
-    st.markdown("### 🔍 So sánh khách có trong file gốc nhưng bị thiếu trong đầu ra")
-    if "original_df" in st.session_state and "exported_names" in st.session_state:
-        df1 = st.session_state["original_df"]
-        exported_names = set(st.session_state["exported_names"])
-        original_names = set(df1["HỌ VÀ TÊN"])
-        missing = original_names - exported_names
+    st.markdown("### 🧮 So sánh khách giữa file gốc và các file đầu ra")
 
-        if missing:
-            st.warning(f"❌ Có {len(missing)} khách bị THIẾU trong file đầu ra:")
+    original_file = st.file_uploader("📂 Chọn file Excel GỐC", type=["xlsx"], key="goc")
+    output_files = st.file_uploader("📂 Chọn các file Excel đầu ra để so sánh", type=["xlsx"], accept_multiple_files=True, key="daura")
 
-            df_missing = df1[df1["HỌ VÀ TÊN"].isin(missing)].copy()
-            df_missing["NGÀY KHÁM"] = pd.to_datetime(df_missing["NGÀY KHÁM"], errors="coerce")
-            df_missing.sort_values(by="NGÀY KHÁM", inplace=True)
+    if original_file and output_files:
+        try:
+            # Đọc file gốc
+            df_orig = pd.read_excel(original_file)
+            df_orig.columns = [c.strip().upper() for c in df_orig.columns]
+            df_orig = df_orig[df_orig["HỌ VÀ TÊN"].notna()]
+            df_orig["NGÀY KHÁM"] = pd.to_datetime(df_orig["NGÀY KHÁM"], errors="coerce")
 
-            for date, group in df_missing.groupby(df_missing["NGÀY KHÁM"].dt.strftime("%d/%m/%Y")):
-                st.markdown(f"### 📅 Ngày khám: `{date}`")
-                st.dataframe(group[["HỌ VÀ TÊN", "KHOA/BỘ PHẬN", "NGÀY KHÁM"]], use_container_width=True)
-        else:
-            st.success("✅ Không có khách nào bị thiếu! Tất cả đã được xử lý đầy đủ.")
+            if "KHOA/BỘ PHẬN" not in df_orig.columns:
+                df_orig["KHOA/BỘ PHẬN"] = "Không rõ"
+
+            original_guests = df_orig[["HỌ VÀ TÊN", "KHOA/BỘ PHẬN", "NGÀY KHÁM"]].drop_duplicates()
+
+            # Đọc toàn bộ file đầu ra
+            out_all = pd.DataFrame()
+            for f in output_files:
+                xls = pd.ExcelFile(f)
+                for sheet in xls.sheet_names:
+                    df_tmp = xls.parse(sheet)
+                    df_tmp.columns = [c.strip().upper() for c in df_tmp.columns]
+                    if "DIỄN GIẢI (HẠCH TOÁN)" in df_tmp.columns:
+                        out_all = pd.concat([out_all, df_tmp], ignore_index=True)
+
+            # Trích tên khách từ diễn giải
+            out_all["HỌ VÀ TÊN"] = out_all["DIỄN GIẢI (HẠCH TOÁN)"].str.extract(r"- (.*)")
+            output_guests = out_all["HỌ VÀ TÊN"].dropna().unique()
+
+            original_names = set(original_guests["HỌ VÀ TÊN"])
+            output_names = set(output_guests)
+
+            missing_names = original_names - output_names
+            extra_names = output_names - original_names
+
+            def display_guest_list(title, name_list, color, full_df):
+                if name_list:
+                    st.markdown(f"### {title} ({len(name_list)} khách)")
+                    df_display = full_df[full_df["HỌ VÀ TÊN"].isin(name_list)].copy()
+                    df_display.sort_values("NGÀY KHÁM", inplace=True)
+                    for date, group in df_display.groupby(df_display["NGÀY KHÁM"].dt.strftime("%d/%m/%Y")):
+                        st.markdown(f"#### 📅 Ngày khám: `{date}`")
+                        st.dataframe(group[["HỌ VÀ TÊN", "KHOA/BỘ PHẬN", "NGÀY KHÁM"]], use_container_width=True)
+                else:
+                    st.success(f"✅ Không có khách nào thuộc nhóm {title.lower()}.")
+
+            display_guest_list("❌ Thiếu khách (có trong file gốc nhưng không có trong đầu ra)", missing_names, "red", original_guests)
+            display_guest_list("⚠️ Dư khách (có trong đầu ra nhưng không có trong file gốc)", extra_names, "orange", pd.DataFrame({"HỌ VÀ TÊN": list(extra_names)}))
+
+        except Exception as e:
+            st.error("❌ Đã xảy ra lỗi:")
+            st.code(traceback.format_exc(), language="python")
     else:
-        st.info("⏳ Vui lòng chạy Tab 1 trước để tạo dữ liệu và so sánh.")
+        st.info("⬆️ Vui lòng chọn đầy đủ file GỐC và file đầu ra để tiến hành so sánh.")
